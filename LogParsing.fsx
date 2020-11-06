@@ -76,7 +76,7 @@ type ItemRecord<'T> = {
 
 type PopulateItemRec<'T> = string * ItemRecord<'T> -> ItemRecord<'T>
 
-let processStream<'T> isNewRecord (populateRecord: PopulateItemRec<'T>) stream =
+let processStream<'T> isNewRecord emptyRecord (populateRecord: PopulateItemRec<'T>) stream =
     let parseStream isNewRecord map (stream: Stream) = 
         let strings = seq {
             use reader = new StreamReader(stream)
@@ -96,7 +96,7 @@ let processStream<'T> isNewRecord (populateRecord: PopulateItemRec<'T>) stream =
                 fullBody = str;
                 next = None;
                 prev = None;
-                record = Unchecked.defaultof<'T>;
+                record = emptyRecord;
                 fileName = "";
              }
         ) |> populateRecord
@@ -113,7 +113,7 @@ let setLinks (records: seq<ItemRecord<'T>>) =
     result
 
 let createRegex regexSting = 
-    Regex(regexSting, RegexOptions.Compiled ||| RegexOptions.CultureInvariant ||| RegexOptions.Singleline )
+    Regex(regexSting, RegexOptions.Compiled ||| RegexOptions.CultureInvariant ||| RegexOptions.Singleline ||| RegexOptions.ExplicitCapture)
 
 let parseString (regexp: Regex) input =
     let matchResult = regexp.Match(input)
@@ -130,6 +130,7 @@ type LogRecordDescriptor<'T> =
         isNewRecordRegexString: string;
         recordRegexString: string;
         populateRecord: Map<string, string> * ItemRecord<'T> -> ItemRecord<'T>;
+        emptyRecord: 'T;
     }
 
 let processStreamByRegex<'T> (recordDescr: LogRecordDescriptor<'T>) stream =
@@ -141,7 +142,7 @@ let processStreamByRegex<'T> (recordDescr: LogRecordDescriptor<'T>) stream =
         match recordAsString |> parseString recordRegex with
             | Some parseResult -> (parseResult, initialProps) |> recordDescr.populateRecord
             | None -> initialProps
-    stream |> processStream isNewRecord populate 
+    stream |> processStream isNewRecord (recordDescr.emptyRecord) populate 
 
 let processFile recordDescr fileName  =
     seq {
@@ -184,6 +185,9 @@ let print (records: seq<ItemRecord<'T>>) =
 let incl (substring: string) records =
     records |> Seq.filter (fun i -> i.body.Contains(substring))
 
+let inclr (substring: string) records =
+    records |> Seq.filter (fun i -> Regex.IsMatch(i.body, substring))
+
 let excl (substring: string) records =
     records |> Seq.filter (fun i -> i.body.Contains(substring) |> not)
 
@@ -206,3 +210,10 @@ let expandBefore count (records: seq<ItemRecord<'T>>) =
             seqEnum
 
     Seq.append before after
+
+let mapr (regex: string) (mapper: Map<string, string> -> 'a) (records: seq<ItemRecord<'T>>) =
+    let reg = createRegex regex
+    records 
+        |> Seq.map (fun r -> parseString reg r.body)
+        |> Seq.choose id
+        |> Seq.map mapper 
